@@ -198,139 +198,96 @@ export function calculateCCI(highs, lows, closes, period = 20) {
  * @param {Object} activeIndicators - 激活的指标配置
  * @returns {Object} 包含各个指标买卖信号的对象
  */
-export function getSignals(indicators, activeIndicators = {}) {
+// 修改getSignals函数签名和实现
+/**
+ * 获取指标的买卖信号
+ * @param {Object} indicators - 包含各个指标计算结果的对象
+ * @param {Object} activeIndicators - 激活的指标配置
+ * @returns {Object} 包含各个指标买卖信号的对象
+ */
+export function getSignals(indicators, activeIndicators = {
+  sma: false,
+  ema: false,
+  kdj: false,
+  roc: false
+}) {
   const signals = {
     summary: { buy: 0, sell: 0, neutral: 0 }
   };
 
-  // 获取单个指标的信号
-  function getSignal(condition, name) {
+  // 处理单个指标信号
+  function processIndicator(name, data, type) {
+    if (!data) return;
+
     let signal = 'neutral';
-    if (condition.buy) signal = 'buy';
-    else if (condition.sell) signal = 'sell';
+    const lastValue = Array.isArray(data) ? data[data.length - 1] : data;
+
+    switch(type) {
+      case 'rsi':
+        signal = lastValue > 70 ? 'sell' : lastValue < 30 ? 'buy' : 'neutral';
+        break;
+      case 'macd':
+        signal = lastValue.MACD > lastValue.signal ? 'buy' :
+                lastValue.MACD < lastValue.signal ? 'sell' : 'neutral';
+        break;
+      case 'bb':
+        if (!indicators.prices) return;
+        const price = indicators.prices[indicators.prices.length - 1];
+        signal = price > lastValue.upper ? 'sell' :
+                price < lastValue.lower ? 'buy' : 'neutral';
+        break;
+      case 'sma':
+      case 'ema':
+        if (!indicators.prices) return;
+        const currentPrice = indicators.prices[indicators.prices.length - 1];
+        const prevPrice = indicators.prices[indicators.prices.length - 2];
+        const prevValue = data[data.length - 2];
+        signal = (prevPrice < prevValue && currentPrice > lastValue) ? 'buy' :
+                (prevPrice > prevValue && currentPrice < lastValue) ? 'sell' : 'neutral';
+        break;
+      case 'kdj':
+        signal = (lastValue.k > lastValue.d) ? 'buy' :
+                (lastValue.k < lastValue.d) ? 'sell' : 'neutral';
+        break;
+      case 'roc':
+        signal = lastValue > 0 ? 'buy' : lastValue < 0 ? 'sell' : 'neutral';
+        break;
+    }
+
     signals[name] = signal;
     signals.summary[signal]++;
   }
 
-  // RSI信号
-  if (indicators.rsi?.length > 0) {
-    const lastRSI = indicators.rsi[indicators.rsi.length - 1];
-    getSignal({
-      buy: lastRSI < 30,
-      sell: lastRSI > 70
-    }, 'rsi');
+  // 处理基础指标
+  processIndicator('rsi', indicators.rsi, 'rsi');
+  processIndicator('macd', indicators.macd, 'macd');
+  processIndicator('bollingerBands', indicators.bb, 'bb');
+
+  // 处理可选指标
+  if (activeIndicators.sma && indicators.sma) {
+    processIndicator('sma', indicators.sma, 'sma');
+  }
+  if (activeIndicators.ema && indicators.ema) {
+    processIndicator('ema', indicators.ema, 'ema');
+  }
+  if (activeIndicators.kdj && indicators.kdj) {
+    processIndicator('kdj', indicators.kdj, 'kdj');
+  }
+  if (activeIndicators.roc && indicators.roc) {
+    processIndicator('roc', indicators.roc, 'roc');
   }
 
-  // MACD信号
-  if (indicators.macd?.length > 0) {
-    const lastMACD = indicators.macd[indicators.macd.length - 1];
-    getSignal({
-      buy: lastMACD.MACD > lastMACD.signal,
-      sell: lastMACD.MACD < lastMACD.signal
-    }, 'macd');
-  }
+  // 计算总体建议
+  const { buy, sell, neutral } = signals.summary;
+  const total = buy + sell + neutral;
+  const buyRatio = buy / total;
+  const sellRatio = sell / total;
 
-  // 布林带信号
-  if (indicators.bb?.length > 0 && indicators.prices) {
-    const lastBB = indicators.bb[indicators.bb.length - 1];
-    const lastPrice = indicators.prices[indicators.prices.length - 1];
-    getSignal({
-      buy: lastPrice < lastBB.lower,
-      sell: lastPrice > lastBB.upper
-    }, 'bollingerBands');
-  }
-
-  // SMA信号
-  if (activeIndicators.sma && indicators.sma?.length > 1 && indicators.prices) {
-    const lastPrice = indicators.prices[indicators.prices.length - 1];
-    const prevPrice = indicators.prices[indicators.prices.length - 2];
-    const lastSMA = indicators.sma[indicators.sma.length - 1];
-    const prevSMA = indicators.sma[indicators.sma.length - 2];
-    getSignal({
-      buy: prevPrice < prevSMA && lastPrice > lastSMA,
-      sell: prevPrice > prevSMA && lastPrice < lastSMA
-    }, 'sma');
-  }
-
-  // EMA信号
-  if (activeIndicators.ema && indicators.ema?.length > 1 && indicators.prices) {
-    const lastPrice = indicators.prices[indicators.prices.length - 1];
-    const prevPrice = indicators.prices[indicators.prices.length - 2];
-    const lastEMA = indicators.ema[indicators.ema.length - 1];
-    const prevEMA = indicators.ema[indicators.ema.length - 2];
-    getSignal({
-      buy: prevPrice < prevEMA && lastPrice > lastEMA,
-      sell: prevPrice > prevEMA && lastPrice < lastEMA
-    }, 'ema');
-  }
-
-  // KDJ信号
-  if (activeIndicators.kdj && indicators.kdj?.length > 1) {
-    const lastKDJ = indicators.kdj[indicators.kdj.length - 1];
-    const prevKDJ = indicators.kdj[indicators.kdj.length - 2];
-    getSignal({
-      buy: (lastKDJ.k > lastKDJ.d && prevKDJ.k < prevKDJ.d) || (lastKDJ.k < 20 && lastKDJ.d < 20),
-      sell: (lastKDJ.k < lastKDJ.d && prevKDJ.k > prevKDJ.d) || (lastKDJ.k > 80 && lastKDJ.d > 80)
-    }, 'kdj');
-  }
-
-  // ROC信号
-  if (activeIndicators.roc && indicators.roc?.length > 1) {
-    const lastROC = indicators.roc[indicators.roc.length - 1];
-    const prevROC = indicators.roc[indicators.roc.length - 2];
-    getSignal({
-      buy: (prevROC < 0 && lastROC > 0) || (lastROC > prevROC && lastROC > 0),
-      sell: (prevROC > 0 && lastROC < 0) || (lastROC < prevROC && lastROC < 0)
-    }, 'roc');
-  }
-
-  // OBV信号
-  if (activeIndicators.obv && indicators.obv?.length > 1 && indicators.volumes) {
-    const lastOBV = indicators.obv[indicators.obv.length - 1];
-    const prevOBV = indicators.obv[indicators.obv.length - 2];
-    const lastVolume = indicators.volumes[indicators.volumes.length - 1];
-    const avgVolume = indicators.volumes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, indicators.volumes.length);
-    
-    getSignal({
-      buy: (prevOBV < lastOBV) && (lastVolume > avgVolume * 1.5),
-      sell: (prevOBV > lastOBV) && (lastVolume > avgVolume * 1.5)
-    }, 'obv');
-  }
-
-  // ATR信号
-  if (activeIndicators.atr && indicators.atr?.length > 1 && indicators.prices) {
-    const lastATR = indicators.atr[indicators.atr.length - 1];
-    const lastPrice = indicators.prices[indicators.prices.length - 1];
-    const prevPrice = indicators.prices[indicators.prices.length - 2];
-    const priceChange = Math.abs(lastPrice - prevPrice);
-    
-    getSignal({
-      buy: priceChange > lastATR * 1.5 && lastPrice > prevPrice,
-      sell: priceChange > lastATR * 1.5 && lastPrice < prevPrice
-    }, 'atr');
-  }
-
-  // ADX信号
-  if (activeIndicators.adx && indicators.adx?.length > 1) {
-    const lastADX = indicators.adx[indicators.adx.length - 1];
-    getSignal({
-      buy: lastADX.adx > 25 && lastADX.plusDI > lastADX.minusDI,
-      sell: lastADX.adx > 25 && lastADX.plusDI < lastADX.minusDI
-    }, 'adx');
-  }
-
-  // CCI信号
-  if (activeIndicators.cci && indicators.cci?.length > 0) {
-    const lastCCI = indicators.cci[indicators.cci.length - 1];
-    getSignal({
-      buy: lastCCI > 100,
-      sell: lastCCI < -100
-    }, 'cci');
-  }
-
-  // 生成总体建议
-  signals.recommendation = signals.summary.buy > signals.summary.sell ? 'buy' :
-                          signals.summary.sell > signals.summary.buy ? 'sell' : 'neutral';
+  if (buyRatio >= 0.6) signals.recommendation = 'buy';
+  else if (sellRatio >= 0.6) signals.recommendation = 'sell';
+  else if (buy > sell) signals.recommendation = 'buy';
+  else if (sell > buy) signals.recommendation = 'sell';
+  else signals.recommendation = 'neutral';
 
   return signals;
 }
